@@ -42,6 +42,20 @@ a{color:inherit}
 .brand .amp{color:var(--pink);font-family:var(--serif);font-style:italic;font-size:.5em;vertical-align:.15em}
 .hero p{font-family:var(--serif);font-style:italic;color:var(--ink-dim);margin-top:14px;font-size:18px}
 
+.clockwrap{background:var(--bg-2);border-bottom:1px solid var(--line);padding:28px 18px}
+.clockcard{max-width:900px;margin:0 auto;background:var(--card);border:1px solid var(--line);
+  border-radius:18px;padding:24px;display:flex;flex-wrap:wrap;gap:24px;align-items:center;justify-content:space-between}
+.clock-time{font-family:var(--display);font-size:52px;letter-spacing:.03em;line-height:1;color:var(--gold-hi)}
+.clock-time span{font-size:22px;color:var(--ink-dim);font-family:var(--sans);margin-left:10px;vertical-align:4px}
+.clock-status{display:flex;align-items:center;gap:10px;font-size:15px;margin-top:8px}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}
+.dot.open{background:var(--mint);box-shadow:0 0 0 0 rgba(77,255,176,.6);animation:pulse 1.6s infinite}
+.dot.closed{background:var(--pink)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(77,255,176,.5)}70%{box-shadow:0 0 0 9px rgba(77,255,176,0)}100%{box-shadow:0 0 0 0 rgba(77,255,176,0)}}
+.week{display:grid;grid-template-columns:1fr auto;gap:6px 18px;font-size:13px;min-width:220px}
+.week .d{color:var(--ink-dim);text-transform:capitalize}
+.week .h{color:var(--ink);text-align:right;white-space:nowrap}
+.week .today .d,.week .today .h{color:var(--gold-hi);font-weight:600}
 .nav{position:sticky;top:0;z-index:30;background:rgba(10,10,10,.92);backdrop-filter:blur(8px);
   border-bottom:1px solid var(--line);display:flex;gap:4px;overflow-x:auto;padding:10px 14px;scrollbar-width:none}
 .nav::-webkit-scrollbar{display:none}
@@ -124,6 +138,16 @@ footer .soc a{color:var(--gold-hi);text-decoration:none;font-size:13px}
   <h1 class="brand gold-text"><span>Beef</span><span class="amp">&amp;</span><span>Pig</span></h1>
   <p>Smash, blend y pulled pork hechos como se debe.</p>
 </header>
+
+<div class="clockwrap">
+  <div class="clockcard">
+    <div>
+      <div class="clock-time" id="clockTime">--:--<span id="clockSec">:--</span></div>
+      <div class="clock-status"><span class="dot" id="statusDot"></span><span id="statusText">Comprobando horario…</span></div>
+    </div>
+    <div class="week" id="weekGrid"></div>
+  </div>
+</div>
 
 <nav class="nav" id="nav">
   <a href="#novedades">Novedades</a>
@@ -287,6 +311,66 @@ footer .soc a{color:var(--gold-hi);text-decoration:none;font-size:13px}
 
 <script>
 const ALG = {1:"Gluten",2:"Huevos",3:"Cacahuetes",4:"Soja",5:"Lácteos",6:"Pescado",7:"Sulfitos",8:"Altramuces",9:"Mostaza",10:"Apio",11:"Frutos de cáscara",12:"Cereal",13:"Moluscos",14:"Crustáceos"};
+
+// Horario · reloj en vivo (hora de Madrid) + estado abierto/cerrado
+const DIAS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+// índice: 0=domingo ... 6=sábado (igual que Date.getDay())
+const HORARIO = {
+  0:[[13,16],[21,23.5]],   // domingo
+  1:[[21,23.5]],           // lunes
+  2:[[21,23.5]],           // martes
+  3:[[21,23.5]],           // miércoles
+  4:[[21,23.5]],           // jueves
+  5:[[13,16],[21,24]],     // viernes
+  6:[[13,16],[21,24]]      // sábado
+};
+function fmtHora(h){
+  let hh=Math.floor(h)%24, mm=Math.round((h-Math.floor(h))*60);
+  if(mm===60){mm=0;hh=(hh+1)%24;}
+  return String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0");
+}
+function rangoTxt(r){return r.map(([a,b])=>fmtHora(a)+"–"+fmtHora(b)).join(", ");}
+function madridNow(){
+  const parts = new Intl.DateTimeFormat("en-US",{timeZone:"Europe/Madrid",hour12:false,
+    weekday:"short",hour:"2-digit",minute:"2-digit",second:"2-digit"}).formatToParts(new Date());
+  const get = t => parts.find(p=>p.type===t).value;
+  const wd = {Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[get("weekday")];
+  return {day:wd, h:+get("hour"), m:+get("minute"), s:+get("second")};
+}
+function estado(now){
+  const hourDec = now.h + now.m/60;
+  const hoy = HORARIO[now.day];
+  for(const [a,b] of hoy) if(hourDec>=a && hourDec<b) return {open:true, until:b};
+  for(const [a,b] of hoy) if(hourDec<a) return {open:false, day:now.day, at:a, isToday:true};
+  for(let i=1;i<=7;i++){
+    const d=(now.day+i)%7;
+    if(HORARIO[d] && HORARIO[d].length) return {open:false, day:d, at:HORARIO[d][0][0], isToday:false};
+  }
+}
+function pintarReloj(){
+  const now = madridNow();
+  document.getElementById("clockTime").innerHTML =
+    String(now.h).padStart(2,"0")+":"+String(now.m).padStart(2,"0")+
+    '<span id="clockSec">:'+String(now.s).padStart(2,"0")+'</span>';
+  const st = estado(now);
+  const dot = document.getElementById("statusDot");
+  const txt = document.getElementById("statusText");
+  if(st.open){
+    dot.className="dot open";
+    txt.textContent="Abierto ahora · cierra a las "+fmtHora(st.until);
+  } else {
+    dot.className="dot closed";
+    const cuando = st.isToday ? "hoy" : (st.day===(now.day+1)%7 ? "mañana" : DIAS[st.day]);
+    txt.textContent="Cerrado · abre "+cuando+" a las "+fmtHora(st.at);
+  }
+  const grid = document.getElementById("weekGrid");
+  grid.innerHTML = [1,2,3,4,5,6,0].map(d=>{
+    const cls = d===now.day ? "today" : "";
+    return `<div class="d ${cls}">${DIAS[d]}</div><div class="h ${cls}">${rangoTxt(HORARIO[d])}</div>`;
+  }).join("");
+}
+pintarReloj();
+setInterval(pintarReloj, 1000);
 
 // Alérgenos: construir sheet + filtrado
 const algGrid=document.getElementById("algGrid");
